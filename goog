@@ -1,0 +1,129 @@
+#!/bin/sh
+
+
+case "${1}" in
+	prereqs)
+		exit 0
+	;;
+esac
+
+set -x
+
+for x in $(cat /proc/cmdline)
+do
+	case $x in
+		cowpath=*)
+			COW_PATH=${x#cowpath=}
+		;;
+		nfsopts=*)
+			NFSOPTS=${x#nfsopts=}
+		;;
+		cowopt=*)
+			COW_OPT=${x#cowopt=}
+		;;
+		cowdev=*)
+			COW_DEV=${x#cowdev=}
+		;;
+	esac
+done
+
+if echo ${COW_OPT} | egrep -q 'full,|,full'
+then
+	COW_FULL=1
+	COW_OPT="$(echo "${COW_OPT}" | sed 's/full//;s/^,//;s/,$//;s/,,/,/')"
+fi
+
+#	env
+#	set -x
+
+if [ -z "${COW_PATH}" ] && [ -z "${COW_DEV}" ]
+then
+	return 0
+fi
+
+if [ -n "${COW_FULL}" ]
+then
+	tmproot=/tmproot
+	mkdir -p ${tmproot}
+	mount --bind --make-rprivate /${rootmnt} ${tmproot}
+	umount /${rootmnt}
+	cowp=${tmproot}/lib/live/cow
+else
+	cowp=${rootmnt}/lib/live/cow
+fi
+
+[ -d "${cowp}" ] || exit 1
+
+case ${COW_DEV} in
+	nfs://*)
+		NFS_COW=${COW_DEV#nfs://}
+		mac=$(ip -o li sh | egrep ether | head -1 | sed 's/.*link\/ether \([0-9a-f:]\+\) .*/\1/;y/:/-/')
+		nfs_mtp=${NFS_COW}/${mac}
+		if [ -n "${NFSOPTS}" ]
+		then
+			nfsopts=nolock,${NFSOPTS}
+		else
+			nfsopts="vers=3,nolock"
+		fi
+		mount -o ${nfsopts} ${nfs_mtp} ${cowp} || return 3
+		break
+	;;
+	/dev/*)
+		if ! [ -e "${COW_DEV}" ] && [ -x /sbin/lvm ]
+		then
+			lvm lvchange --ignorelockingfailure -ay "${COW_DEV}" || return 5
+		fi
+		#e2fsck -fy ${COW_DEV}
+		if [ -n "${COW_OPT}" ]
+		then
+			cow_opt="-o ${COW_OPT}"
+		else
+			unset cow_opt
+		fi
+		mount -t ext4 ${cow_opt} ${COW_DEV} ${cowp} || return 4
+		break
+	;;
+	*)	
+		mount -t tmpfs none ${cowp}
+		if [ -n "${COW_PATH}" ] 
+		then
+			for cowpth in /${rootmnt}/live/bck/${COW_PATH} ${COW_PATH} ${cowp}/${COW_PATH}
+			do
+				[ -f ${cowpth} ] && tar zxf ${cowpth} -C ${cowp} && break
+			done
+		fi
+	;;
+esac
+
+	#:>/etc/mtab
+
+if [ -d "${cowp}/pld" ]
+then
+	mcowp="${cowp}/pld"
+else
+	mcowp="${cowp}"
+fi
+
+if [ -n "${COW_FULL}" ]
+then
+	mount -t overlay -o lowerdir=${tmproot},workdir=${cowp}/wrk,upperdir=${mcowp} none /${rootmnt} || exit 8
+
+	mount --bind --make-rprivate ${tmproot} /${rootmnt}/lib/live/image || exit 9
+	mount --bind --make-rprivate ${cowp} /${rootmnt}/lib/live/cow || exit 10
+
+	umount ${cowp} || exit 11
+	umount ${tmproot} || exit 12
+
+else
+	for mtp in etc var root
+	do
+		optst="upperdir=${mcowp}/${mtp},lowerdir=/${rootmnt}/${mtp},workdir=${cowp}/work/${mtp}"
+		#[ -n "${auxopt}" ] && optst=${auxopt},${optst}
+		mkdir -p ${cowp}/${mtp} ${cowp}/work/${mtp}
+		mount -t overlay -o ${optst} none /${rootmnt}/${mtp} || return 5
+	done
+fi
+
+#mount -t tmpfs none /tmp
+
+exit 0
