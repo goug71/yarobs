@@ -1,13 +1,13 @@
 #!/bin/sh
 
-
+# handle initramfs-tools prereq (not yet)
 case "${1}" in
 	prereqs)
 		exit 0
 	;;
 esac
 
-set -x
+set -x #FIXME: use better initramfs-tools log/debug tools
 
 for x in $(cat /proc/cmdline)
 do
@@ -27,7 +27,8 @@ do
 	esac
 done
 
-if echo ${COW_OPT} | egrep -q 'full,|,full'
+# Do we want a full overlay or rather just /etc /var and /root overlayed 
+if echo ${COW_OPT} | egrep -q '^full,|,full$|^full$|,full,'
 then
 	COW_FULL=1
 	COW_OPT="$(echo "${COW_OPT}" | sed 's/full//;s/^,//;s/,$//;s/,,/,/')"
@@ -36,22 +37,25 @@ fi
 #	env
 #	set -x
 
+# Bare minimum to kick in
 if [ -z "${COW_PATH}" ] && [ -z "${COW_DEV}" ]
 then
 	return 0
 fi
 
+# In the case of a full overlay, we move mounted /root out of the way to build the stack and provide access to pristine root
 if [ -n "${COW_FULL}" ]
 then
 	tmproot=/tmproot
 	mkdir -p ${tmproot}
-	mount --bind --make-rprivate /${rootmnt} ${tmproot}
+	mount --bind --make-rprivate /${rootmnt} ${tmproot} # FIXME : rprivate does not seem to work in this context
 	umount /${rootmnt}
 	cowp=${tmproot}/lib/live/cow
 else
 	cowp=${rootmnt}/lib/live/cow
 fi
 
+# We bail out if we do not have anywhere to mount the stack
 [ -d "${cowp}" ] || exit 1
 
 case ${COW_DEV} in
@@ -95,8 +99,6 @@ case ${COW_DEV} in
 	;;
 esac
 
-	#:>/etc/mtab
-
 if [ -d "${cowp}/pld" ]
 then
 	mcowp="${cowp}/pld"
@@ -124,6 +126,6 @@ else
 	done
 fi
 
-#mount -t tmpfs none /tmp
+#mount -t tmpfs none /tmp #now handled by systemd
 
 exit 0
