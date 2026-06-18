@@ -1,5 +1,5 @@
 # yarobs
-Yet another read-only/overlay boot script for ust any linux distro using initramfs-tools
+Yet another read-only/overlay boot script for use with any linux distro using initramfs-tools
 
 This is yet another overlay boot script, initially targetted at initramfs-tools
 This script allows to boot from a read-only medium, and adds overlay from either 
